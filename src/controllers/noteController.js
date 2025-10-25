@@ -1,14 +1,10 @@
-import { pool } from '../config/database.js';
+import Note from '../models/noteModel.js';
 
 // Get all notes
 export const getAllNotes = async (req, res, next) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM notes ORDER BY created_at DESC');
-    res.json({
-      success: true,
-      count: rows.length,
-      data: rows
-    });
+    const notes = await Note.find().sort({ createdAt: -1 });
+    res.json({ success: true, count: notes.length, data: notes });
   } catch (error) {
     next(error);
   }
@@ -17,57 +13,21 @@ export const getAllNotes = async (req, res, next) => {
 // Get note by ID
 export const getNoteById = async (req, res, next) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM notes WHERE id = ?', [req.params.id]);
-    
-    if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Note not found'
-      });
-    }
-    
-    res.json({
-      success: true,
-      data: rows[0]
-    });
+    const note = await Note.findById(req.params.id);
+    if (!note) return res.status(404).json({ success: false, message: 'Note not found' });
+    res.json({ success: true, data: note });
   } catch (error) {
     next(error);
   }
 };
 
-// Create new note
+// Create note
 export const createNote = async (req, res, next) => {
   try {
     const { title, content } = req.body;
-    
-    // Validation
-    if (!title || !content) {
-      return res.status(400).json({
-        success: false,
-        message: 'Title and content are required'
-      });
-    }
-    
-    if (title.trim().length === 0 || content.trim().length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Title and content cannot be empty'
-      });
-    }
-    
-    const [result] = await pool.query(
-      'INSERT INTO notes (title, content) VALUES (?, ?)',
-      [title.trim(), content.trim()]
-    );
-    
-    // Fetch the created note
-    const [newNote] = await pool.query('SELECT * FROM notes WHERE id = ?', [result.insertId]);
-    
-    res.status(201).json({
-      success: true,
-      message: 'Note created successfully',
-      data: newNote[0]
-    });
+    if (!title || !content) return res.status(400).json({ success: false, message: 'Title and content are required' });
+    const note = await Note.create({ title, content });
+    res.status(201).json({ success: true, message: 'Note created successfully', data: note });
   } catch (error) {
     next(error);
   }
@@ -77,46 +37,9 @@ export const createNote = async (req, res, next) => {
 export const updateNote = async (req, res, next) => {
   try {
     const { title, content } = req.body;
-    const { id } = req.params;
-    
-    // Validation
-    if (!title || !content) {
-      return res.status(400).json({
-        success: false,
-        message: 'Title and content are required'
-      });
-    }
-    
-    if (title.trim().length === 0 || content.trim().length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Title and content cannot be empty'
-      });
-    }
-    
-    // Check if note exists
-    const [existingNote] = await pool.query('SELECT id FROM notes WHERE id = ?', [id]);
-    
-    if (existingNote.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Note not found'
-      });
-    }
-    
-    await pool.query(
-      'UPDATE notes SET title = ?, content = ?, updated_at = NOW() WHERE id = ?',
-      [title.trim(), content.trim(), id]
-    );
-    
-    // Fetch updated note
-    const [updatedNote] = await pool.query('SELECT * FROM notes WHERE id = ?', [id]);
-    
-    res.json({
-      success: true,
-      message: 'Note updated successfully',
-      data: updatedNote[0]
-    });
+    const note = await Note.findByIdAndUpdate(req.params.id, { title, content }, { new: true, runValidators: true });
+    if (!note) return res.status(404).json({ success: false, message: 'Note not found' });
+    res.json({ success: true, message: 'Note updated successfully', data: note });
   } catch (error) {
     next(error);
   }
@@ -125,25 +48,9 @@ export const updateNote = async (req, res, next) => {
 // Delete note
 export const deleteNote = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    
-    // Check if note exists
-    const [existingNote] = await pool.query('SELECT * FROM notes WHERE id = ?', [id]);
-    
-    if (existingNote.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Note not found'
-      });
-    }
-    
-    await pool.query('DELETE FROM notes WHERE id = ?', [id]);
-    
-    res.json({
-      success: true,
-      message: 'Note deleted successfully',
-      data: existingNote[0]
-    });
+    const note = await Note.findByIdAndDelete(req.params.id);
+    if (!note) return res.status(404).json({ success: false, message: 'Note not found' });
+    res.json({ success: true, message: 'Note deleted successfully', data: note });
   } catch (error) {
     next(error);
   }
@@ -153,26 +60,14 @@ export const deleteNote = async (req, res, next) => {
 export const searchNotes = async (req, res, next) => {
   try {
     const { q } = req.query;
-    
-    if (!q) {
-      return res.status(400).json({
-        success: false,
-        message: 'Search query parameter "q" is required'
-      });
-    }
-    
-    const searchTerm = `%${q}%`;
-    const [rows] = await pool.query(
-      'SELECT * FROM notes WHERE title LIKE ? OR content LIKE ? ORDER BY created_at DESC',
-      [searchTerm, searchTerm]
-    );
-    
-    res.json({
-      success: true,
-      count: rows.length,
-      query: q,
-      data: rows
-    });
+    if (!q) return res.status(400).json({ success: false, message: 'Search query parameter \"q\" is required' });
+    const notes = await Note.find({ 
+      $or: [
+        { title: { $regex: q, $options: 'i' } },
+        { content: { $regex: q, $options: 'i' } }
+      ]
+    }).sort({ createdAt: -1 });
+    res.json({ success: true, count: notes.length, query: q, data: notes });
   } catch (error) {
     next(error);
   }
